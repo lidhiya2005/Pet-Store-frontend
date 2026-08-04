@@ -40,21 +40,6 @@ consultation_types = [
     {"id": "c6", "name": "Nutrition & Diet Plan", "duration": "35 min", "price": 60, "icon": "🥗", "description": "Personalized meal planning for weight management or special dietary needs."},
 ]
 
-consultation_purposes = [
-    {"id": "p1", "label": "Routine Checkup", "icon": "🩺", "category": "wellness"},
-    {"id": "p2", "label": "Vaccination", "icon": "💉", "category": "wellness"},
-    {"id": "p3", "label": "Sick / Injury", "icon": "🏥", "category": "health"},
-    {"id": "p4", "label": "Dental Care", "icon": "🦷", "category": "health"},
-    {"id": "p5", "label": "Grooming", "icon": "✂️", "category": "grooming"},
-    {"id": "p6", "label": "Behavioral Issues", "icon": "🧠", "category": "behavior"},
-    {"id": "p7", "label": "Nutrition / Diet", "icon": "🥗", "category": "wellness"},
-    {"id": "p8", "label": "Weight Management", "icon": "⚖️", "category": "wellness"},
-    {"id": "p9", "label": "Follow-up Visit", "icon": "📋", "category": "health"},
-    {"id": "p10", "label": "Senior Pet Care", "icon": "👴", "category": "wellness"},
-    {"id": "p11", "label": "Allergy / Skin Issues", "icon": "🌿", "category": "health"},
-    {"id": "p12", "label": "Other Concern", "icon": "📝", "category": "other"},
-]
-
 testimonials = [
     {"name": "Sarah Johnson", "role": "Happy Dog Owner", "text": "I found my best friend here! The adoption process was smooth and the staff truly cares about the animals.", "avatar": "SJ", "rating": 5},
     {"name": "Marcus Chen", "role": "Cat Lover", "text": "Amazing selection of healthy pets. Luna has been a joy since day one. Highly recommended!", "avatar": "MC", "rating": 5},
@@ -69,7 +54,7 @@ def seed():
 
     # Clear existing data
     tables = ["order_items", "orders", "cart_items", "consultations", "pet_foods", "pets", "consultation_types",
-              "consultation_purposes", "testimonials", "users"]
+              "testimonials", "users"]
     for table in tables:
         db.execute(f"DELETE FROM {table}")
 
@@ -96,14 +81,6 @@ def seed():
             (ct["id"], ct["name"], ct["duration"], ct["price"], ct["icon"], ct["description"]),
         )
     print(f"  - {len(consultation_types)} consultation types seeded")
-
-    # Insert consultation purposes
-    for cp in consultation_purposes:
-        db.execute(
-            "INSERT INTO consultation_purposes (id, label, icon, category) VALUES (?, ?, ?, ?)",
-            (cp["id"], cp["label"], cp["icon"], cp["category"]),
-        )
-    print(f"  - {len(consultation_purposes)} consultation purposes seeded")
 
     # Insert testimonials
     for t in testimonials:

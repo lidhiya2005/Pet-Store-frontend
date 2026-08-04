@@ -4,6 +4,7 @@ import Header from './components/Header';
 import Hero from './components/Hero';
 import CategoryFilter from './components/CategoryFilter';
 import PetCard from './components/PetCard';
+import RecommendationCard from './components/RecommendationCard';
 import {
   categories, testimonials, petFoodCategories,
   petTypes
@@ -13,6 +14,19 @@ import './styles/App.css';
 
 // ===== API Service =====
 const API_BASE = '/api';
+
+// Local YYYY-MM-DD for today (avoids UTC off-by-one on the date picker's min)
+const todayLocal = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Pretty-print a YYYY-MM-DD preferred date (parsed as local time)
+const formatConsultDate = (iso) =>
+  iso
+    ? new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
 
 async function apiFetch(url, options = {}) {
   const token = localStorage.getItem('token');
@@ -33,23 +47,24 @@ function App() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [shippingInfo, setShippingInfo] = useState({ name: '', email: '', phone: '', address: '', city: '', state: '', zip: '' });
+  const [savedAddress, setSavedAddress] = useState(null);
+  const [editAddress, setEditAddress] = useState(false);
   const [orderResult, setOrderResult] = useState(null);
   const [showOrders, setShowOrders] = useState(false);
+  const [ordersTab, setOrdersTab] = useState('orders');
   const [userOrders, setUserOrders] = useState([]);
+  const [userConsultations, setUserConsultations] = useState([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [consultForm, setConsultForm] = useState({
     serviceId: null,
-    petName: '', petType: '', petBreed: '', petAge: '', petWeight: '', petGender: '',
-    ownerName: '', email: '', phone: '', address: '',
-    purposes: [],
-    allergies: '', medications: '', chronicConditions: '',
-    isVaccinated: '', hadSurgeries: '', lastVetVisit: '',
-    emergencyName: '', emergencyPhone: '', emergencyRelation: '',
-    preferredDate: '', preferredTime: '', preferredContact: 'email',
-    notes: '',
+    petName: '', petType: '', petBreed: '', petAge: '',
+    preferredDate: '',
+    description: '',
+    phone: '',
   });
   const [consultStep, setConsultStep] = useState(0);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [lastBooking, setLastBooking] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [user, setUser] = useState(null);
@@ -64,6 +79,7 @@ function App() {
   const [adminFoods, setAdminFoods] = useState([]);
   const [adminOrders, setAdminOrders] = useState([]);
   const [adminMessages, setAdminMessages] = useState([]);
+  const [adminConsultations, setAdminConsultations] = useState([]);
   const [adminInventory, setAdminInventory] = useState({items:[],low_stock:[],low_stock_count:0});
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminDashboard, setAdminDashboard] = useState(null);
@@ -80,12 +96,6 @@ function App() {
   const [showCatForm, setShowCatForm] = useState(false);
   const [catFormData, setCatFormData] = useState({name:'',type:'pet',icon:'📦'});
   const [editingCat, setEditingCat] = useState(null);
-  const [showPricing, setShowPricing] = useState(null);
-  const [pricingData, setPricingData] = useState({price:'',discount_price:'',discount_start:'',discount_end:''});
-  const [showBulkPricing, setShowBulkPricing] = useState(false);
-  const [bulkPricing, setBulkPricing] = useState({type:'pet',discount_percent:'',start:'',end:''});
-  const [showImageManager, setShowImageManager] = useState(null);
-  const [newImageUrl, setNewImageUrl] = useState('');
   const [showAdjust, setShowAdjust] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [invHistory, setInvHistory] = useState([]);
@@ -98,7 +108,11 @@ function App() {
   const [apiPets, setApiPets] = useState([]);
   const [apiFoods, setApiFoods] = useState([]);
   const [apiConsultTypes, setApiConsultTypes] = useState([]);
-  const [apiConsultPurposes, setApiConsultPurposes] = useState([]);
+
+  // Content-based recommendations
+  const [petRecs, setPetRecs] = useState([]);
+  const [foodRecs, setFoodRecs] = useState([]);
+  const [cartRecs, setCartRecs] = useState([]);
 
   useEffect(() => {
     async function loadData() {
@@ -107,16 +121,14 @@ function App() {
         if (window.location.pathname === '/admin') {
           setActiveTab('admin');
         }
-        const [petsData, foodsData, consultTypes, consultPurposes] = await Promise.all([
+        const [petsData, foodsData, consultTypes] = await Promise.all([
           apiFetch('/pets'),
           apiFetch('/foods'),
           apiFetch('/consultations/types'),
-          apiFetch('/consultations/purposes'),
         ]);
         setApiPets(petsData);
         setApiFoods(foodsData);
         setApiConsultTypes(consultTypes);
-        setApiConsultPurposes(consultPurposes);
       } catch (err) {
         console.error('Failed to fetch data:', err);
       } finally {
@@ -155,6 +167,7 @@ function App() {
       loadAdminInventory();
       loadAdminCategories();
       loadAdminMessages();
+      loadAdminConsultations();
       loadAdminUsers();
     }
   }, [activeTab, isAdmin]);
@@ -198,7 +211,7 @@ function App() {
       setShowAuth(false);
       setAuthForm({ email: '', password: '', name: '' });
     } catch (err) {
-      setAuthError(err.message + '. Try demo@petstore.com / demo1234');
+      setAuthError(err.message);
     }
   };
 
@@ -234,6 +247,15 @@ function App() {
       setUserOrders(orders);
     } catch (err) {
       console.error('Failed to load orders:', err);
+    }
+  };
+
+  const loadConsultations = async () => {
+    try {
+      const consults = await apiFetch('/consultations');
+      setUserConsultations(consults);
+    } catch (err) {
+      console.error('Failed to load consultations:', err);
     }
   };
 
@@ -277,6 +299,13 @@ function App() {
     try {
       const data = await adminFetch('/messages');
       setAdminMessages(data);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadAdminConsultations = async () => {
+    try {
+      const data = await adminFetch('/consultations');
+      setAdminConsultations(data);
     } catch (err) { console.error(err); }
   };
 
@@ -372,6 +401,17 @@ function App() {
   const handleConsultSubmit = async (formData) => {
     if (!formData.serviceId) return;
     try {
+      const service = apiConsultTypes.find((s) => s.id === formData.serviceId);
+      setLastBooking({
+        date: formData.preferredDate,
+        serviceName: service ? `${service.icon} ${service.name}` : 'Consult',
+        price: service ? service.price : null,
+        petName: formData.petName,
+        petType: formData.petType,
+        petBreed: formData.petBreed,
+        petAge: formData.petAge,
+        phone: formData.phone,
+      });
       await apiFetch('/consultations', {
         method: 'POST',
         body: JSON.stringify({
@@ -380,41 +420,19 @@ function App() {
           pet_type: formData.petType,
           pet_breed: formData.petBreed,
           pet_age: formData.petAge,
-          pet_weight: formData.petWeight,
-          pet_gender: formData.petGender,
-          owner_name: formData.ownerName,
-          email: formData.email,
-          phone: formData.phone,
-          address: formData.address,
-          purposes: formData.purposes,
-          allergies: formData.allergies,
-          medications: formData.medications,
-          chronic_conditions: formData.chronicConditions,
-          is_vaccinated: formData.isVaccinated,
-          had_surgeries: formData.hadSurgeries,
-          last_vet_visit: formData.lastVetVisit,
-          emergency_name: formData.emergencyName,
-          emergency_phone: formData.emergencyPhone,
-          emergency_relation: formData.emergencyRelation,
           preferred_date: formData.preferredDate,
-          preferred_time: formData.preferredTime,
-          preferred_contact: formData.preferredContact,
-          notes: formData.notes,
+          description: formData.description,
+          phone: formData.phone,
         }),
       });
       setBookingSuccess(true);
-      setTimeout(() => setBookingSuccess(false), 4000);
       setConsultStep(0);
       setConsultForm({
         serviceId: null,
-        petName: '', petType: '', petBreed: '', petAge: '', petWeight: '', petGender: '',
-        ownerName: '', email: '', phone: '', address: '',
-        purposes: [],
-        allergies: '', medications: '', chronicConditions: '',
-        isVaccinated: '', hadSurgeries: '', lastVetVisit: '',
-        emergencyName: '', emergencyPhone: '', emergencyRelation: '',
-        preferredDate: '', preferredTime: '', preferredContact: 'email',
-        notes: '',
+        petName: '', petType: '', petBreed: '', petAge: '',
+        preferredDate: '',
+        description: '',
+        phone: '',
       });
     } catch (err) {
       alert('Booking failed: ' + err.message);
@@ -425,48 +443,16 @@ function App() {
     setConsultForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const toggleConsultPurpose = (purposeId) => {
-    setConsultForm((prev) => {
-      const purposes = prev.purposes.includes(purposeId)
-        ? prev.purposes.filter((id) => id !== purposeId)
-        : [...prev.purposes, purposeId];
-      return { ...prev, purposes };
-    });
-  };
+  const canSubmitConsult =
+    !!consultForm.serviceId &&
+    !!(consultForm.petName || '').trim() &&
+    !!consultForm.petType &&
+    !!(consultForm.petAge || '').trim() &&
+    !!(consultForm.preferredDate || '').trim() &&
+    !!(consultForm.description || '').trim() &&
+    !!(consultForm.phone || '').trim();
 
-  const wizardSteps = [
-    { id: 'service',    icon: '🩺', label: 'Service' },
-    { id: 'pet',        icon: '🐾', label: 'Pet Info' },
-    { id: 'owner',      icon: '👤', label: 'Owner' },
-    { id: 'purpose',    icon: '📋', label: 'Purpose' },
-    { id: 'medical',    icon: '🏥', label: 'Medical' },
-    { id: 'emergency',  icon: '🆘', label: 'Emergency' },
-    { id: 'appointment', icon: '📅', label: 'Appointment' },
-    { id: 'notes',      icon: '📝', label: 'Notes & Submit' },
-  ];
-
-  const canProceed = () => {
-    const step = wizardSteps[consultStep];
-    if (!step) return false;
-    switch (step.id) {
-      case 'service': return !!consultForm.serviceId;
-      case 'pet': return !!consultForm.petName && !!consultForm.petType && !!consultForm.petAge;
-      case 'owner': return !!consultForm.ownerName && !!consultForm.email && !!consultForm.phone;
-      case 'purpose': return consultForm.purposes.length > 0;
-      case 'appointment': return !!consultForm.preferredDate && !!consultForm.preferredTime;
-      default: return true;
-    }
-  };
-
-  const goNextStep = () => {
-    if (consultStep < wizardSteps.length - 1 && canProceed()) {
-      setConsultStep((s) => s + 1);
-    }
-  };
-
-  const goPrevStep = () => {
-    if (consultStep > 0) setConsultStep((s) => s - 1);
-  };
+  const selectedService = apiConsultTypes.find((s) => s.id === consultForm.serviceId);
 
   const addToCart = (pet) => {
     setCartItems((prev) => {
@@ -481,6 +467,102 @@ function App() {
       return [...prev, { ...pet, quantity: 1 }];
     });
   };
+
+  // Load content-based recommendations for the pets tab.
+  // On the "All Pets" view we cross-sell popular food; on a specific
+  // category we recommend similar pets that aren't already on screen.
+  const loadPetRecs = async () => {
+    try {
+      const isAll = activeCategory === 'all';
+      const params = new URLSearchParams({
+        item_type: isAll ? 'food' : 'pet',
+        category: activeCategory,
+        limit: '4',
+      });
+      if (!isAll) {
+        params.set('exclude_ids', filteredPets.map((p) => p.id).join(','));
+      }
+      const data = await apiFetch('/recommendations?' + params.toString());
+      setPetRecs(data);
+    } catch {
+      setPetRecs([]);
+    }
+  };
+
+  // Load content-based recommendations for the food tab.
+  // On the "All Food" view we cross-sell popular pets; on a specific
+  // category we recommend similar food that isn't already on screen.
+  const loadFoodRecs = async () => {
+    try {
+      const isAll = activeFoodCategory === 'all';
+      const params = new URLSearchParams({
+        item_type: isAll ? 'pet' : 'food',
+        category: activeFoodCategory,
+        limit: '4',
+      });
+      if (!isAll) {
+        params.set('exclude_ids', filteredFoods.map((f) => f.id).join(','));
+      }
+      const data = await apiFetch('/recommendations?' + params.toString());
+      setFoodRecs(data);
+    } catch {
+      setFoodRecs([]);
+    }
+  };
+
+  // Add an item to the cart, normalising food items to the store shape.
+  // Food cart items must carry category: 'food' so checkout and the
+  // recommendation endpoint can tell food from pets.
+  const addRecItem = (item) => {
+    const isFood = item.item_type === 'food' || ('brand' in item && !('breed' in item));
+    if (isFood) {
+      addToCart({
+        ...item,
+        age: '',
+        breed: item.brand || '',
+        gender: '',
+        vaccinated: false,
+        category: 'food',
+      });
+    } else {
+      addToCart(item);
+    }
+  };
+
+  // Load cart-based recommendations whenever the cart is opened
+  const loadCartRecs = async () => {
+    try {
+      const items = cartItems.map((item) => ({
+        item_type: item.category === 'food' ? 'food' : 'pet',
+        item_id: String(item.id),
+        quantity: item.quantity,
+      }));
+      const data = await apiFetch('/recommendations/from-items', {
+        method: 'POST',
+        body: JSON.stringify({ items, limit: 4 }),
+      });
+      setCartRecs(data);
+    } catch {
+      setCartRecs([]);
+    }
+  };
+
+  // Reload pet/food recommendations when the tab or category changes
+  useEffect(() => {
+    if (activeTab === 'pets') loadPetRecs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeCategory, apiPets]);
+
+  useEffect(() => {
+    if (activeTab === 'food') loadFoodRecs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeFoodCategory, apiFoods]);
+
+  // Refresh cart recommendations when the cart is opened or changes
+  useEffect(() => {
+    if (showCart && cartItems.length > 0) loadCartRecs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCart, cartItems]);
 
   const removeFromCart = (petId) => {
     setCartItems((prev) => prev.filter((item) => item.id !== petId));
@@ -521,7 +603,8 @@ function App() {
           user={user}
           onLoginClick={() => openAuth('login')}
           onLogout={handleLogout}
-          onOrdersClick={() => { loadOrders(); setShowOrders(true); }}
+          onOrdersClick={() => { loadOrders(); loadConsultations(); setOrdersTab('orders'); setShowOrders(true); }}
+          onConsultationsClick={() => { loadOrders(); loadConsultations(); setOrdersTab('consultations'); setShowOrders(true); }}
           isAdmin={isAdmin}
         />
         <main className="main-content">
@@ -545,7 +628,8 @@ function App() {
         user={user}
         onLoginClick={() => openAuth('login')}
         onLogout={handleLogout}
-        onOrdersClick={() => { loadOrders(); setShowOrders(true); }}
+        onOrdersClick={() => { loadOrders(); loadConsultations(); setOrdersTab('orders'); setShowOrders(true); }}
+        onConsultationsClick={() => { loadOrders(); loadConsultations(); setOrdersTab('consultations'); setShowOrders(true); }}
         isAdmin={isAdmin}
       />
 
@@ -562,6 +646,15 @@ function App() {
                   ✕
                 </button>
               </div>
+              {cartItems.length > 0 && (
+                <button
+                  className="cart-recs-refresh"
+                  onClick={loadCartRecs}
+                  title="Refresh recommendations"
+                >
+                  🪄 Match suggestions
+                </button>
+              )}
               {cartItems.length === 0 ? (
                 <div className="cart-empty">
                   <span className="cart-empty-icon">🛒</span>
@@ -595,6 +688,35 @@ function App() {
                       </div>
                     ))}
                   </div>
+                  {cartRecs.length > 0 && (
+                    <div className="cart-recs">
+                      <div className="cart-recs-header">
+                        <h4>✨ Complete Your Cart</h4>
+                        <span>Based on items you added</span>
+                      </div>
+                      {cartRecs.map((item) => (
+                        <div key={item.id} className="cart-rec-item">
+                          <div className="cart-rec-item-img">
+                            <img src={item.image} alt={item.name} />
+                          </div>
+                          <div className="cart-rec-item-info">
+                            <h5>{item.name}</h5>
+                            <p className="cart-rec-item-reason">{item.reason}</p>
+                            <span className="cart-rec-item-price">
+                              ${Number(item.price || 0).toLocaleString()}
+                            </span>
+                          </div>
+                          <button
+                            className="cart-rec-item-add"
+                            onClick={() => addRecItem(item)}
+                            title="Add to cart"
+                          >
+                            +
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="cart-footer">
                     <div className="cart-total">
                       <span>Total</span>
@@ -604,6 +726,20 @@ function App() {
                       className="btn btn-primary cart-checkout"
                       onClick={() => {
                         if (!user) { setShowAuth(true); return; }
+                        const addrKey = 'petstore_address' + (user?.id ? '_' + user.id : '');
+                        let saved = null;
+                        try { saved = JSON.parse(localStorage.getItem(addrKey) || 'null'); } catch { saved = null; }
+                        setSavedAddress(saved);
+                        setEditAddress(!saved);
+                        setShippingInfo({
+                          name: user.name || '',
+                          email: user.email || '',
+                          phone: saved?.phone || '',
+                          address: saved?.address || '',
+                          city: saved?.city || '',
+                          state: saved?.state || '',
+                          zip: saved?.zip || '',
+                        });
                         setShowCart(false);
                         setShowCheckout(true);
                         setCheckoutStep(0);
@@ -619,7 +755,7 @@ function App() {
           </>
         )}
 
-        {/* ===== Pets Section ===== */}
+        {/* ===== Pets Section (Home) ===== */}
         {activeTab === 'pets' && (
           <>
             <section id="pets" className="section">
@@ -641,6 +777,20 @@ function App() {
                 <div className="no-results">
                   <span>😕</span>
                   <p>No pets found in this category.</p>
+                </div>
+              )}
+
+              {petRecs.length > 0 && (
+                <div className="rec-section">
+                  <div className="rec-section-header">
+                    <h3>✨ You Might Also Like</h3>
+                    <p>Hand-picked matches based on what you're browsing</p>
+                  </div>
+                  <div className="rec-grid">
+                    {petRecs.map((item) => (
+                      <RecommendationCard key={item.id} item={item} onAddToCart={addToCart} />
+                    ))}
+                  </div>
                 </div>
               )}
             </section>
@@ -720,14 +870,28 @@ function App() {
                 <p>No food products found in this category.</p>
               </div>
             )}
+
+            {foodRecs.length > 0 && (
+              <div className="rec-section">
+                <div className="rec-section-header">
+                  <h3>✨ You Might Also Like</h3>
+                  <p>Hand-picked matches based on what you're browsing</p>
+                </div>
+                <div className="rec-grid">
+                  {foodRecs.map((item) => (
+                    <RecommendationCard key={item.id} item={item} onAddToCart={addToCart} />
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
-{/* ===== Consultation Section (Multi-Step Wizard) ===== */}
+{/* ===== Consult Section (Stepper Booking) ===== */}
         {activeTab === 'consultation' && (
           <section id="consultation" className="section consultation-section">
             <div className="section-header">
-              <h2>Book a Consultation</h2>
+              <h2>Book a Consult</h2>
               <p>Expert veterinary care and pet services tailored to your companion's needs.</p>
             </div>
 
@@ -735,42 +899,62 @@ function App() {
               <div className="booking-success">
                 <span className="booking-success-icon">✅</span>
                 <h3>Booking Confirmed!</h3>
-                <p>We'll send a confirmation to your email shortly. Thank you for choosing PetStore!</p>
+                <p>We'll contact you at the number you provided to confirm your appointment. Thank you for choosing PetStore!</p>
+                {lastBooking && (
+                  <div className="booking-summary">
+                    <div className="booking-summary-row booking-date-row">
+                      <span className="booking-summary-label">📅 Booked Date</span>
+                      <strong>{formatConsultDate(lastBooking.date) || 'Not set'}</strong>
+                    </div>
+                    <div className="booking-summary-row">
+                      <span className="booking-summary-label">Service</span>
+                      <span>{lastBooking.serviceName}{lastBooking.price != null && <small> · ${lastBooking.price}</small>}</span>
+                    </div>
+                    <div className="booking-summary-row">
+                      <span className="booking-summary-label">Pet</span>
+                      <span>{lastBooking.petName}{lastBooking.petType ? <small> · {lastBooking.petType}{lastBooking.petBreed ? ', ' + lastBooking.petBreed : ''}{lastBooking.petAge ? `, ${lastBooking.petAge} mo` : ''}</small> : ''}</span>
+                    </div>
+                    <div className="booking-summary-row">
+                      <span className="booking-summary-label">Contact</span>
+                      <span>{lastBooking.phone}</span>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="booking-another-btn"
+                  onClick={() => {
+                    setBookingSuccess(false);
+                    setLastBooking(null);
+                  }}
+                >
+                  Book Another Consult
+                </button>
               </div>
             ) : (
-              <div className="consultation-form-wrapper">
-                {/* Progress Bar */}
-                <div className="wizard-progress">
-                  {wizardSteps.map((step, i) => (
-                    <div key={step.id} className="wizard-step-indicator">
-                      <button
-                        className={`wizard-dot ${i <= consultStep ? 'wizard-dot-active' : ''} ${i === consultStep ? 'wizard-dot-current' : ''}`}
-                        onClick={() => i <= consultStep && setConsultStep(i)}
-                        disabled={i > consultStep}
-                        title={step.label}
-                      >
-                        {i < consultStep ? '✓' : step.icon}
-                      </button>
-                      <span className={`wizard-step-label ${i === consultStep ? 'wizard-step-label-active' : ''}`}>
-                        {step.label}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="wizard-progress-bar">
-                    <div className="wizard-progress-fill" style={{ width: `${(consultStep / (wizardSteps.length - 1)) * 100}%` }} />
+              <div className="consultation-layout">
+                <div className="consultation-form-wrapper">
+                {/* Stepper */}
+                <div className="checkout-steps">
+                  <div className={`cs-step ${consultStep === 0 ? 'cs-active' : ''} ${consultStep === 1 ? 'cs-done' : ''}`}>
+                    <span className="cs-dot">{consultStep === 1 ? '✓' : '1'}</span>
+                    <span className="cs-label">Select Service</span>
+                  </div>
+                  <div className={`cs-step ${consultStep === 1 ? 'cs-active' : ''}`}>
+                    <span className="cs-dot">2</span>
+                    <span className="cs-label">Pet & Contact</span>
                   </div>
                 </div>
 
-                {/* Active Step Content */}
-                <div className="wizard-step-content">
-                  {/* Step 0: Service Selection */}
+                <form onSubmit={(e) => { e.preventDefault(); handleConsultSubmit(consultForm); }}>
+                  {/* Step 1: Select Service */}
                   {consultStep === 0 && (
-                    <div className="cf-section">
+                    <div className="cf-section consult-step-content">
                       <div className="cf-section-header">
                         <span className="cf-section-icon">🩺</span>
                         <div>
                           <h3 className="cf-section-title">Select a Service</h3>
-                          <p className="cf-section-subtitle">Choose the type of consultation your pet needs</p>
+                          <p className="cf-section-subtitle">Choose the type of consult your pet needs</p>
                         </div>
                       </div>
                       <div className="cf-service-grid">
@@ -796,334 +980,174 @@ function App() {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
 
-                  {/* Step 1: Pet Information */}
-                  {consultStep === 1 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">🐾</span>
-                        <div>
-                          <h3 className="cf-section-title">Pet Information</h3>
-                          <p className="cf-section-subtitle">Tell us about your furry (or scaly) friend</p>
-                        </div>
-                      </div>
-                      <div className="cf-fields-grid">
-                        <div className="cf-field">
-                          <label className="cf-label">Pet Name <span className="cf-required">*</span></label>
-                          <input type="text" className="cf-input" placeholder="e.g. Buddy" value={consultForm.petName} onChange={(e) => updateConsultField('petName', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Pet Type <span className="cf-required">*</span></label>
-                          <select className="cf-input cf-select" value={consultForm.petType} onChange={(e) => updateConsultField('petType', e.target.value)} required>
-                            <option value="">Select type...</option>
-                            {petTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Breed</label>
-                          <input type="text" className="cf-input" placeholder="e.g. Golden Retriever" value={consultForm.petBreed} onChange={(e) => updateConsultField('petBreed', e.target.value)} />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Age <span className="cf-required">*</span></label>
-                          <input type="text" className="cf-input" placeholder="e.g. 2 years" value={consultForm.petAge} onChange={(e) => updateConsultField('petAge', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Weight</label>
-                          <input type="text" className="cf-input" placeholder="e.g. 15 lbs" value={consultForm.petWeight} onChange={(e) => updateConsultField('petWeight', e.target.value)} />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Gender</label>
-                          <div className="cf-radio-group">
-                            <label className={`cf-radio ${consultForm.petGender === 'male' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="petGender" value="male" checked={consultForm.petGender === 'male'} onChange={(e) => updateConsultField('petGender', e.target.value)} />
-                              <span>♂ Male</span>
-                            </label>
-                            <label className={`cf-radio ${consultForm.petGender === 'female' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="petGender" value="female" checked={consultForm.petGender === 'female'} onChange={(e) => updateConsultField('petGender', e.target.value)} />
-                              <span>♀ Female</span>
-                            </label>
-                            <label className={`cf-radio ${consultForm.petGender === 'unknown' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="petGender" value="unknown" checked={consultForm.petGender === 'unknown'} onChange={(e) => updateConsultField('petGender', e.target.value)} />
-                              <span>❓ Unknown</span>
-                            </label>
+                      {selectedService && (
+                        <div className="cf-service-detail">
+                          <div className="cf-service-detail-header">
+                            <span className="cf-service-detail-icon">{selectedService.icon}</span>
+                            <div className="cf-service-detail-title">
+                              <h4>{selectedService.name}</h4>
+                              <span className="cf-service-detail-selected">✓ Selected</span>
+                            </div>
+                          </div>
+                          <p className="cf-service-detail-desc">{selectedService.description}</p>
+                          <div className="cf-service-detail-meta">
+                            <span className="cf-service-detail-meta-item">
+                              <span className="cf-service-detail-meta-label">Duration</span>
+                              <strong>⏱️ {selectedService.duration}</strong>
+                            </span>
+                            <span className="cf-service-detail-meta-item">
+                              <span className="cf-service-detail-meta-label">Fee</span>
+                              <strong className="cf-service-detail-price">${selectedService.price}</strong>
+                            </span>
+                            <span className="cf-service-detail-meta-item cf-service-detail-date-item">
+                              <span className="cf-service-detail-meta-label">Booked Date</span>
+                              <strong>📅 {formatConsultDate(consultForm.preferredDate || (lastBooking && lastBooking.date)) || 'Not booked yet'}</strong>
+                            </span>
+                          </div>
+                          <div className="cf-service-detail-footer">
+                            <span className="cf-service-detail-hint">
+                              This service will be added to your booking
+                            </span>
+                            <button
+                              type="button"
+                              className="cf-service-detail-next"
+                              onClick={() => setConsultStep(1)}
+                            >
+                              Continue
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="9 18 15 12 9 6" />
+                              </svg>
+                            </button>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 2: Owner Information */}
-                  {consultStep === 2 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">👤</span>
-                        <div>
-                          <h3 className="cf-section-title">Owner Information</h3>
-                          <p className="cf-section-subtitle">How can we reach you?</p>
-                        </div>
-                      </div>
-                      <div className="cf-fields-grid">
-                        <div className="cf-field">
-                          <label className="cf-label">Your Name <span className="cf-required">*</span></label>
-                          <input type="text" className="cf-input" placeholder="e.g. John Doe" value={consultForm.ownerName} onChange={(e) => updateConsultField('ownerName', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Email <span className="cf-required">*</span></label>
-                          <input type="email" className="cf-input" placeholder="you@example.com" value={consultForm.email} onChange={(e) => updateConsultField('email', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Phone <span className="cf-required">*</span></label>
-                          <input type="tel" className="cf-input" placeholder="(555) 123-4567" value={consultForm.phone} onChange={(e) => updateConsultField('phone', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Address</label>
-                          <input type="text" className="cf-input" placeholder="123 Pet Street, Animal City" value={consultForm.address} onChange={(e) => updateConsultField('address', e.target.value)} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Purpose of Visit */}
-                  {consultStep === 3 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">📋</span>
-                        <div>
-                          <h3 className="cf-section-title">Purpose of Visit</h3>
-                          <p className="cf-section-subtitle">Select all concerns or reasons for this visit</p>
-                        </div>
-                      </div>
-                      <div className="cf-purpose-grid">
-                        {apiConsultPurposes.map((p) => (
-                          <label key={p.id} className={`cf-purpose-chip ${consultForm.purposes.includes(p.id) ? 'cf-purpose-active' : ''}`}>
-                            <input type="checkbox" checked={consultForm.purposes.includes(p.id)} onChange={() => toggleConsultPurpose(p.id)} className="cf-purpose-checkbox" />
-                            <span className="cf-purpose-icon">{p.icon}</span>
-                            <span className="cf-purpose-label">{p.label}</span>
-                            <span className="cf-purpose-category">{p.category}</span>
-                          </label>
-                        ))}
-                      </div>
-                      {consultForm.purposes.length > 0 && (
-                        <div className="cf-purpose-count">{consultForm.purposes.length} concern{consultForm.purposes.length > 1 ? 's' : ''} selected</div>
                       )}
                     </div>
                   )}
 
-                  {/* Step 4: Medical History */}
-                  {consultStep === 4 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">🏥</span>
-                        <div>
-                          <h3 className="cf-section-title">Medical History</h3>
-                          <p className="cf-section-subtitle">Help us understand your pet's health background</p>
-                        </div>
-                      </div>
-                      <div className="cf-fields-grid">
-                        <div className="cf-field cf-field-wide">
-                          <label className="cf-label">Known Allergies</label>
-                          <textarea className="cf-input cf-textarea" placeholder="List any allergies your pet may have (food, environmental, medication)..." rows="2" value={consultForm.allergies} onChange={(e) => updateConsultField('allergies', e.target.value)} />
-                        </div>
-                        <div className="cf-field cf-field-wide">
-                          <label className="cf-label">Current Medications</label>
-                          <textarea className="cf-input cf-textarea" placeholder="List any medications your pet is currently taking..." rows="2" value={consultForm.medications} onChange={(e) => updateConsultField('medications', e.target.value)} />
-                        </div>
-                        <div className="cf-field cf-field-wide">
-                          <label className="cf-label">Chronic Conditions</label>
-                          <textarea className="cf-input cf-textarea" placeholder="Any ongoing health conditions we should know about..." rows="2" value={consultForm.chronicConditions} onChange={(e) => updateConsultField('chronicConditions', e.target.value)} />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Vaccination Status</label>
-                          <div className="cf-radio-group">
-                            <label className={`cf-radio ${consultForm.isVaccinated === 'yes' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="vaccinated" value="yes" checked={consultForm.isVaccinated === 'yes'} onChange={(e) => updateConsultField('isVaccinated', e.target.value)} />
-                              <span>✅ Up to date</span>
-                            </label>
-                            <label className={`cf-radio ${consultForm.isVaccinated === 'no' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="vaccinated" value="no" checked={consultForm.isVaccinated === 'no'} onChange={(e) => updateConsultField('isVaccinated', e.target.value)} />
-                              <span>❌ Not current</span>
-                            </label>
-                            <label className={`cf-radio ${consultForm.isVaccinated === 'unsure' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="vaccinated" value="unsure" checked={consultForm.isVaccinated === 'unsure'} onChange={(e) => updateConsultField('isVaccinated', e.target.value)} />
-                              <span>❓ Not sure</span>
-                            </label>
+                  {/* Step 2: Pet Details, Description & Contact */}
+                  {consultStep === 1 && (
+                    <div className="consult-step-content">
+                      {/* Pet Details */}
+                      <div className="cf-section">
+                        <div className="cf-section-header">
+                          <span className="cf-section-icon">🐾</span>
+                          <div>
+                            <h3 className="cf-section-title">Pet Details</h3>
+                            <p className="cf-section-subtitle">Tell us about your pet</p>
                           </div>
                         </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Previous Surgeries</label>
-                          <div className="cf-radio-group">
-                            <label className={`cf-radio ${consultForm.hadSurgeries === 'yes' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="surgeries" value="yes" checked={consultForm.hadSurgeries === 'yes'} onChange={(e) => updateConsultField('hadSurgeries', e.target.value)} />
-                              <span>Yes</span>
-                            </label>
-                            <label className={`cf-radio ${consultForm.hadSurgeries === 'no' ? 'cf-radio-active' : ''}`}>
-                              <input type="radio" name="surgeries" value="no" checked={consultForm.hadSurgeries === 'no'} onChange={(e) => updateConsultField('hadSurgeries', e.target.value)} />
-                              <span>No</span>
-                            </label>
+                        <div className="cf-fields-grid">
+                          <div className="cf-field">
+                            <label className="cf-label">Pet Name <span className="cf-required">*</span></label>
+                            <input type="text" className="cf-input" placeholder="e.g. Buddy" value={consultForm.petName} onChange={(e) => updateConsultField('petName', e.target.value)} required />
+                          </div>
+                          <div className="cf-field">
+                            <label className="cf-label">Pet Type <span className="cf-required">*</span></label>
+                            <select className="cf-input cf-select" value={consultForm.petType} onChange={(e) => updateConsultField('petType', e.target.value)} required>
+                              <option value="">Select type...</option>
+                              {petTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div className="cf-field">
+                            <label className="cf-label">Breed</label>
+                            <input type="text" className="cf-input" placeholder="e.g. Golden Retriever" value={consultForm.petBreed} onChange={(e) => updateConsultField('petBreed', e.target.value)} />
+                          </div>
+                          <div className="cf-field">
+                            <label className="cf-label">Age (months) <span className="cf-required">*</span></label>
+                            <input type="number" className="cf-input" placeholder="e.g. 12" min="0" step="1" value={consultForm.petAge} onChange={(e) => updateConsultField('petAge', e.target.value)} required />
                           </div>
                         </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Last Vet Visit</label>
-                          <input type="text" className="cf-input" placeholder="e.g. 3 months ago" value={consultForm.lastVetVisit} onChange={(e) => updateConsultField('lastVetVisit', e.target.value)} />
-                        </div>
                       </div>
-                    </div>
-                  )}
 
-                  {/* Step 5: Emergency Contact */}
-                  {consultStep === 5 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">🆘</span>
-                        <div>
-                          <h3 className="cf-section-title">Emergency Contact</h3>
-                          <p className="cf-section-subtitle">Who should we reach in an emergency (optional)</p>
-                        </div>
-                      </div>
-                      <div className="cf-fields-grid">
-                        <div className="cf-field">
-                          <label className="cf-label">Contact Name</label>
-                          <input type="text" className="cf-input" placeholder="Emergency contact name" value={consultForm.emergencyName} onChange={(e) => updateConsultField('emergencyName', e.target.value)} />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Phone</label>
-                          <input type="tel" className="cf-input" placeholder="(555) 987-6543" value={consultForm.emergencyPhone} onChange={(e) => updateConsultField('emergencyPhone', e.target.value)} />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Relationship</label>
-                          <input type="text" className="cf-input" placeholder="e.g. Spouse, Parent, Friend" value={consultForm.emergencyRelation} onChange={(e) => updateConsultField('emergencyRelation', e.target.value)} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 6: Appointment Details */}
-                  {consultStep === 6 && (
-                    <div className="cf-section">
-                      <div className="cf-section-header">
-                        <span className="cf-section-icon">📅</span>
-                        <div>
-                          <h3 className="cf-section-title">Appointment Details</h3>
-                          <p className="cf-section-subtitle">When would you like to come in?</p>
-                        </div>
-                      </div>
-                      <div className="cf-fields-grid">
-                        <div className="cf-field">
-                          <label className="cf-label">Preferred Date <span className="cf-required">*</span></label>
-                          <input type="date" className="cf-input" value={consultForm.preferredDate} onChange={(e) => updateConsultField('preferredDate', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Preferred Time <span className="cf-required">*</span></label>
-                          <input type="time" className="cf-input" value={consultForm.preferredTime} onChange={(e) => updateConsultField('preferredTime', e.target.value)} required />
-                        </div>
-                        <div className="cf-field">
-                          <label className="cf-label">Contact Method</label>
-                          <select className="cf-input cf-select" value={consultForm.preferredContact} onChange={(e) => updateConsultField('preferredContact', e.target.value)}>
-                            <option value="email">✉️ Email</option>
-                            <option value="phone">📞 Phone</option>
-                            <option value="text">💬 Text Message</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 7: Notes & Submit */}
-                  {consultStep === 7 && (
-                    <>
+                      {/* Description */}
                       <div className="cf-section">
                         <div className="cf-section-header">
                           <span className="cf-section-icon">📝</span>
                           <div>
-                            <h3 className="cf-section-title">Additional Notes</h3>
-                            <p className="cf-section-subtitle">Anything else we should know?</p>
+                            <h3 className="cf-section-title">Description</h3>
+                            <p className="cf-section-subtitle">What is this consult about?</p>
                           </div>
                         </div>
                         <div className="cf-field cf-field-wide">
-                          <textarea className="cf-input cf-textarea" placeholder="Share any additional information, questions, or special requests..." rows="4" value={consultForm.notes} onChange={(e) => updateConsultField('notes', e.target.value)} />
+                          <label className="cf-label">Describe your pet's issue or request <span className="cf-required">*</span></label>
+                          <textarea className="cf-input cf-textarea" rows="4" maxLength={500} placeholder="e.g. Buddy has been scratching his ear for a few days and seems uncomfortable..." value={consultForm.description} onChange={(e) => updateConsultField('description', e.target.value)} required />
+                          <span className={`cf-char-count ${consultForm.description.length >= 500 ? 'cf-char-count-full' : ''}`}>
+                            {consultForm.description.length} / 500
+                          </span>
                         </div>
                       </div>
 
-                      {/* Summary */}
-                      <div className="cf-section cf-summary-section">
+                      {/* Preferred Date */}
+                      <div className="cf-section">
                         <div className="cf-section-header">
-                          <span className="cf-section-icon">📄</span>
+                          <span className="cf-section-icon">📅</span>
                           <div>
-                            <h3 className="cf-section-title">Booking Summary</h3>
-                            <p className="cf-section-subtitle">Review your details before confirming</p>
+                            <h3 className="cf-section-title">Preferred Date</h3>
+                            <p className="cf-section-subtitle">When would you like the consult?</p>
                           </div>
                         </div>
-                        <div className="cf-summary-grid">
-                          <div className="cf-summary-item">
-                            <span className="cf-summary-label">Service</span>
-                            <span className="cf-summary-value">{apiConsultTypes.find(s => s.id === consultForm.serviceId)?.icon} {apiConsultTypes.find(s => s.id === consultForm.serviceId)?.name} — ${apiConsultTypes.find(s => s.id === consultForm.serviceId)?.price}</span>
-                          </div>
-                          <div className="cf-summary-item">
-                            <span className="cf-summary-label">Pet</span>
-                            <span className="cf-summary-value">{consultForm.petName} ({consultForm.petType}{consultForm.petBreed ? `, ${consultForm.petBreed}` : ''}) — {consultForm.petAge}</span>
-                          </div>
-                          <div className="cf-summary-item">
-                            <span className="cf-summary-label">Owner</span>
-                            <span className="cf-summary-value">{consultForm.ownerName} · {consultForm.email} · {consultForm.phone}</span>
-                          </div>
-                          <div className="cf-summary-item">
-                            <span className="cf-summary-label">Purposes</span>
-                            <span className="cf-summary-value">{consultForm.purposes.map(id => apiConsultPurposes.find(p => p.id === id)?.label).join(', ')}</span>
-                          </div>
-                          <div className="cf-summary-item">
-                            <span className="cf-summary-label">Appointment</span>
-                            <span className="cf-summary-value">{consultForm.preferredDate} at {consultForm.preferredTime} · Contact via {consultForm.preferredContact}</span>
-                          </div>
+                        <div className="cf-field cf-field-wide">
+                          <label className="cf-label">Choose a date <span className="cf-required">*</span></label>
+                          <input type="date" className="cf-input" min={todayLocal()} value={consultForm.preferredDate} onChange={(e) => updateConsultField('preferredDate', e.target.value)} required />
                         </div>
                       </div>
 
-                      <form onSubmit={(e) => { e.preventDefault(); handleConsultSubmit(consultForm); }}>
-                        <div className="cf-submit-row">
-                          <div className="cf-submit-info">
-                            {consultForm.serviceId ? (
-                              <>
-                                <span className="cf-submit-service">{apiConsultTypes.find(s => s.id === consultForm.serviceId)?.icon} {apiConsultTypes.find(s => s.id === consultForm.serviceId)?.name}</span>
-                                <span className="cf-submit-price">${apiConsultTypes.find(s => s.id === consultForm.serviceId)?.price}</span>
-                              </>
-                            ) : (
-                              <span className="cf-submit-hint">Please select a service</span>
-                            )}
+                      {/* Guardian Contact */}
+                      <div className="cf-section">
+                        <div className="cf-section-header">
+                          <span className="cf-section-icon">📞</span>
+                          <div>
+                            <h3 className="cf-section-title">Contact Number</h3>
+                            <p className="cf-section-subtitle">Where should we reach you to confirm the booking?</p>
                           </div>
-                          <button type="submit" className="cf-submit-btn" disabled={!consultForm.serviceId}>
-                            <span>Confirm Booking</span>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="9 18 15 12 9 6" />
-                            </svg>
-                          </button>
                         </div>
-                      </form>
-                    </>
+                        <div className="cf-field cf-field-wide">
+                          <label className="cf-label">Guardian Contact Number <span className="cf-required">*</span></label>
+                          <input type="tel" className="cf-input" placeholder="(555) 123-4567" value={consultForm.phone} onChange={(e) => updateConsultField('phone', e.target.value)} required />
+                        </div>
+                      </div>
+
+                      {/* Submit */}
+                      <div className="cf-submit-row">
+                        <div className="cf-submit-info">
+                          {consultForm.serviceId ? (
+                            <>
+                              <span className="cf-submit-service">{apiConsultTypes.find(s => s.id === consultForm.serviceId)?.icon} {apiConsultTypes.find(s => s.id === consultForm.serviceId)?.name}</span>
+                              <span className="cf-submit-price">${apiConsultTypes.find(s => s.id === consultForm.serviceId)?.price}</span>
+                            </>
+                          ) : (
+                            <span className="cf-submit-hint">Please select a service</span>
+                          )}
+                        </div>
+                        <button type="submit" className="cf-submit-btn" disabled={!canSubmitConsult}>
+                          <span>Confirm Booking</span>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="9 18 15 12 9 6" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   )}
 
-                  {/* Navigation Buttons */}
-                  <div className="wizard-nav">
-                    <button
-                      className={`wizard-btn wizard-btn-back ${consultStep === 0 ? 'wizard-btn-hidden' : ''}`}
-                      onClick={goPrevStep}
-                      disabled={consultStep === 0}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="15 18 9 12 15 6" />
-                      </svg>
-                      Back
-                    </button>
-
-                    <div className="wizard-step-counter">
-                      Step {consultStep + 1} of {wizardSteps.length}
-                    </div>
-
-                    {consultStep < wizardSteps.length - 1 ? (
+                  {/* Navigation */}
+                  <div className="consult-nav">
+                    {consultStep === 1 ? (
+                      <button type="button" className="wizard-btn wizard-btn-back" onClick={() => setConsultStep(0)}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="15 18 9 12 15 6" />
+                        </svg>
+                        Back
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+                    {consultStep === 0 ? (
                       <button
-                        className={`wizard-btn wizard-btn-next ${!canProceed() ? 'wizard-btn-disabled' : ''}`}
-                        onClick={goNextStep}
-                        disabled={!canProceed()}
+                        type="button"
+                        className="wizard-btn wizard-btn-next"
+                        onClick={() => setConsultStep(1)}
+                        disabled={!consultForm.serviceId}
                       >
                         Next
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1134,6 +1158,7 @@ function App() {
                       <div />
                     )}
                   </div>
+                </form>
                 </div>
               </div>
             )}
@@ -1285,19 +1310,16 @@ function App() {
                   🛒 Orders
                 </button>
                 <button className={`admin-nav-btn ${adminTab === 'messages' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('messages'); loadAdminMessages(); }}>
-                  ✉️ Messages
+                  ✉️ Enquiry
+                </button>
+                <button className={`admin-nav-btn ${adminTab === 'consultations' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('consultations'); loadAdminConsultations(); }}>
+                  🩺 Consults
                 </button>
                 <button className={`admin-nav-btn ${adminTab === 'users' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('users'); loadAdminUsers(); }}>
                   👥 Users
                 </button>
                 <button className={`admin-nav-btn ${adminTab === 'categories' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('categories'); loadAdminCategories(); }}>
                   🏷️ Categories
-                </button>
-                <button className={`admin-nav-btn ${adminTab === 'pricing' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('pricing'); }}>
-                  💰 Pricing
-                </button>
-                <button className={`admin-nav-btn ${adminTab === 'images' ? 'admin-nav-active' : ''}`} onClick={() => { setAdminTab('images'); }}>
-                  🖼️ Images
                 </button>
               </div>
             </div>
@@ -1328,10 +1350,6 @@ function App() {
                           <span className="admin-stat-icon">🛒</span>
                           <div><span className="admin-stat-value">{adminDashboard.stats.total_orders}</span><span className="admin-stat-label">Orders</span></div>
                         </div>
-                        <div className="admin-stat-card admin-stat-orange" style={{cursor:'pointer'}} onClick={()=>setAdminTab('pricing')} role="button" tabIndex={0} onKeyDown={e=>(e.key==='Enter'||e.key===' ')&&setAdminTab('pricing')}>
-                          <span className="admin-stat-icon">💰</span>
-                          <div><span className="admin-stat-value">${(adminDashboard.stats.total_revenue||0).toLocaleString()}</span><span className="admin-stat-label">Revenue</span></div>
-                        </div>
                         <div className="admin-stat-card admin-stat-red" style={{cursor:'pointer'}} onClick={()=>setAdminTab('orders')} role="button" tabIndex={0} onKeyDown={e=>(e.key==='Enter'||e.key===' ')&&setAdminTab('orders')}>
                           <span className="admin-stat-icon">⏳</span>
                           <div><span className="admin-stat-value">{adminDashboard.stats.pending_orders}</span><span className="admin-stat-label">Pending</span></div>
@@ -1360,8 +1378,6 @@ function App() {
                           {icon:'🗑️',label:'Delete Product',tab:'products',color:'red',desc:'Archive discontinued items',action:'Delete'},
                           {icon:'📦',label:'Inventory Mgmt',tab:'inventory',color:'orange',desc:'Restock, adjust & history',action:'Manage'},
                           {icon:'🏷️',label:'Categories',tab:'categories',color:'pink',desc:'Create & manage categories',action:'CRUD'},
-                          {icon:'🖼️',label:'Product Images',tab:'images',color:'teal',desc:'Upload & manage images',action:'Images'},
-                          {icon:'💰',label:'Pricing & Discounts',tab:'pricing',color:'yellow',desc:'Bulk & scheduled pricing',action:'Price'},
                         ].map((a,i)=>(
                           <div key={i} className={`admin-stat-card admin-stat-${a.color}`} style={{cursor:'pointer'}} onClick={()=>setAdminTab(a.tab)} role="button" tabIndex={0} onKeyDown={e=>(e.key==='Enter'||e.key===' ')&&setAdminTab(a.tab)}>
                             <span className="admin-stat-icon">{a.icon}</span>
@@ -1384,10 +1400,10 @@ function App() {
                           {adminProducts.length>0?<div style={{display:'flex',flexDirection:'column',gap:8}}>
                             {adminProducts.slice(0,5).map(p=>(
                               <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'var(--gray-100)',borderRadius:'var(--radius-sm)'}}>
-                                {p.image?<img src={p.image} alt="" style={{width:36,height:36,borderRadius:6,objectFit:'cover'}}/>:<div style={{width:36,height:36,borderRadius:6,background:'var(--gray-200)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.2rem'}}>🐾</div>}
+                                <span style={{fontSize:'1.2rem'}}>🐾</span>
                                 <div style={{flex:1}}>
                                   <div style={{fontWeight:600,fontSize:'0.85rem'}}>{p.name}</div>
-                                  <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{p.breed} · ${p.price}</div>
+                                  <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{p.breed}</div>
                                 </div>
                                 <span className={`admin-cat-tag`}>{p.category}</span>
                                 {p.quantity<=3?<span className="admin-low-badge">Low</span>:null}
@@ -1420,44 +1436,22 @@ function App() {
                         </div>
                       </div>
 
-                      {/* ===== 4. CATEGORIES + PRICING OVERVIEW ===== */}
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
-                        {/* Categories */}
-                        <div style={{background:'var(--white)',borderRadius:'var(--radius-md)',padding:20,border:'1px solid var(--gray-200)',boxShadow:'var(--shadow-sm)'}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                            <h3 style={{fontSize:'1rem',fontWeight:700}}>🏷️ Categories</h3>
-                            <button className="btn btn-primary" style={{padding:'6px 14px',fontSize:'0.8rem'}} onClick={()=>setAdminTab('categories')}>Manage</button>
-                          </div>
-                          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
-                            {(adminCategories.defaults?.pets||[]).map(c=>(
-                              <span key={c.id} style={{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',background:'rgba(108,99,255,0.08)',borderRadius:50,fontSize:'0.78rem',fontWeight:600}}>{c.icon} {c.name}</span>
-                            ))}
-                            <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',background:'var(--gray-200)',borderRadius:50,fontSize:'0.78rem',fontWeight:600}}>⋯</span>
-                          </div>
-                          <p style={{fontSize:'0.8rem',color:'var(--gray-400)'}}>
-                            {adminCategories.custom?.length||0} custom categories · 
-                            <button className="btn-link" style={{background:'none',border:'none',color:'var(--primary)',cursor:'pointer',fontSize:'0.8rem',fontWeight:600}} onClick={()=>setAdminTab('categories')}>Create new →</button>
-                          </p>
+                      {/* ===== 4. CATEGORIES OVERVIEW ===== */}
+                      <div style={{background:'var(--white)',borderRadius:'var(--radius-md)',padding:20,marginBottom:24,border:'1px solid var(--gray-200)',boxShadow:'var(--shadow-sm)'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                          <h3 style={{fontSize:'1rem',fontWeight:700}}>🏷️ Categories</h3>
+                          <button className="btn btn-primary" style={{padding:'6px 14px',fontSize:'0.8rem'}} onClick={()=>setAdminTab('categories')}>Manage</button>
                         </div>
-
-                        {/* Pricing */}
-                        <div style={{background:'var(--white)',borderRadius:'var(--radius-md)',padding:20,border:'1px solid var(--gray-200)',boxShadow:'var(--shadow-sm)'}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                            <h3 style={{fontSize:'1rem',fontWeight:700}}>💰 Pricing</h3>
-                            <button className="btn btn-primary" style={{padding:'6px 14px',fontSize:'0.8rem'}} onClick={()=>setAdminTab('pricing')}>Manage</button>
-                          </div>
-                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                            <div style={{padding:12,background:'var(--gray-100)',borderRadius:'var(--radius-sm)',textAlign:'center'}}>
-                              <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--primary)'}}>${adminDashboard.stats.total_revenue?.toLocaleString()||0}</div>
-                              <div style={{fontSize:'0.75rem',color:'var(--gray-500)'}}>Total Revenue</div>
-                            </div>
-                            <div style={{padding:12,background:'rgba(255,217,61,0.1)',borderRadius:'var(--radius-sm)',textAlign:'center'}}>
-                              <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--accent)'}}>{adminDashboard.stats.on_sale||0}</div>
-                              <div style={{fontSize:'0.75rem',color:'var(--gray-500)'}}>Items on Sale</div>
-                            </div>
-                          </div>
-                          <button className="btn btn-primary" style={{width:'100%',marginTop:10,padding:'8px',fontSize:'0.85rem'}} onClick={()=>setAdminTab('pricing')}>📊 Apply Bulk Discount</button>
+                        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
+                          {(adminCategories.defaults?.pets||[]).map(c=>(
+                            <span key={c.id} style={{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',background:'rgba(108,99,255,0.08)',borderRadius:50,fontSize:'0.78rem',fontWeight:600}}>{c.icon} {c.name}</span>
+                          ))}
+                          <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',background:'var(--gray-200)',borderRadius:50,fontSize:'0.78rem',fontWeight:600}}>⋯</span>
                         </div>
+                        <p style={{fontSize:'0.8rem',color:'var(--gray-400)'}}>
+                          {adminCategories.custom?.length||0} custom categories · 
+                          <button className="btn-link" style={{background:'none',border:'none',color:'var(--primary)',cursor:'pointer',fontSize:'0.8rem',fontWeight:600}} onClick={()=>setAdminTab('categories')}>Create new →</button>
+                        </p>
                       </div>
 
                       {/* ===== 5. RECENT ORDERS ===== */}
@@ -1489,10 +1483,10 @@ function App() {
 
                       {/* ===== 6. RECENT MESSAGES + USERS ===== */}
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
-                        {/* Messages */}
+                        {/* Enquiry */}
                         <div style={{background:'var(--white)',borderRadius:'var(--radius-md)',padding:20,border:'1px solid var(--gray-200)',boxShadow:'var(--shadow-sm)'}}>
                           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                            <h3 style={{fontSize:'1rem',fontWeight:700}}>✉️ Recent Messages</h3>
+                            <h3 style={{fontSize:'1rem',fontWeight:700}}>✉️ Recent Enquiries</h3>
                             <button className="btn btn-primary" style={{padding:'6px 14px',fontSize:'0.8rem'}} onClick={()=>setAdminTab('messages')}>View All</button>
                           </div>
                           {adminMessages.length>0?<div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -1505,7 +1499,7 @@ function App() {
                                 <p style={{fontSize:'0.78rem',color:'var(--gray-500)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{msg.message}</p>
                               </div>
                             ))}
-                          </div>:<p className="admin-empty" style={{padding:20}}>No messages yet</p>}
+                          </div>:<p className="admin-empty" style={{padding:20}}>No enquiries yet</p>}
                         </div>
 
                         {/* Users */}
@@ -1607,8 +1601,6 @@ function App() {
                               <div className="admin-actions">
                                 <button className="admin-btn-sm" title="View" onClick={() => setProdDetail({item:p,type:'pet'})}>👁️</button>
                                 <button className="admin-btn-sm" title="Edit" onClick={() => { setShowAdminForm('edit'); setAdminFormType('pet'); setAdminFormData(p); }}>✏️</button>
-                                <button className="admin-btn-sm" title="Images" onClick={()=>setShowImageManager({item:p,type:'pet'})}>🖼️</button>
-                                <button className="admin-btn-sm" title="Pricing" onClick={()=>{setPricingData({price:p.price||'',discount_price:p.discount_price||'',discount_start:p.discount_start||'',discount_end:p.discount_end||''});setShowPricing({item:p,type:'pet'});}}>💰</button>
                                 <button className="admin-btn-sm admin-btn-danger" title="Delete" onClick={async () => {
                                   if (confirm('Delete ' + p.name + '?')) {
                                     try { await adminFetch('/pets/' + p.id, { method: 'DELETE' }); loadAdminProducts(); } catch (e) { alert(e.message); }
@@ -1655,8 +1647,6 @@ function App() {
                               <div className="admin-actions">
                                 <button className="admin-btn-sm" title="View" onClick={() => setProdDetail({item:f,type:'food'})}>👁️</button>
                                 <button className="admin-btn-sm" title="Edit" onClick={() => { setShowAdminForm('edit'); setAdminFormType('food'); setAdminFormData(f); }}>✏️</button>
-                                <button className="admin-btn-sm" title="Images" onClick={()=>setShowImageManager({item:f,type:'food'})}>🖼️</button>
-                                <button className="admin-btn-sm" title="Pricing" onClick={()=>{setPricingData({price:f.price||'',discount_price:f.discount_price||'',discount_start:f.discount_start||'',discount_end:f.discount_end||''});setShowPricing({item:f,type:'food'});}}>💰</button>
                                 <button className="admin-btn-sm admin-btn-danger" title="Delete" onClick={async () => {
                                   if (confirm('Delete ' + f.name + '?')) {
                                     try { await adminFetch('/foods/' + f.id, { method: 'DELETE' }); loadAdminProducts(); } catch (e) { alert(e.message); }
@@ -1963,11 +1953,11 @@ function App() {
                 </>
               )}
 
-              {/* Messages */}
+              {/* Enquiry */}
               {adminTab === 'messages' && (
                 <>
                   <div className="admin-page-header">
-                    <h2 className="admin-page-title">✉️ Contact Messages</h2>
+                    <h2 className="admin-page-title">✉️ Contact Enquiries</h2>
                     <button className="btn btn-primary" onClick={loadAdminMessages}>🔄 Refresh</button>
                   </div>
                   <div className="admin-messages">
@@ -1981,7 +1971,7 @@ function App() {
                           <div className="admin-msg-actions">
                             <span className="admin-date">{new Date(msg.created_at).toLocaleString()}</span>
                             <button className="admin-btn-sm admin-btn-danger" onClick={async () => {
-                              if (confirm('Delete this message?')) {
+                              if (confirm('Delete this enquiry?')) {
                                 try { await adminFetch('/messages/' + msg.id, { method: 'DELETE' }); loadAdminMessages(); } catch (e) { alert(e.message); }
                               }
                             }}>🗑️</button>
@@ -1991,8 +1981,67 @@ function App() {
                       </div>
                     ))}
                     {adminMessages.length === 0 && (
-                      <div className="admin-empty"><button className="btn btn-primary" onClick={loadAdminMessages}>Load Messages</button></div>
+                      <div className="admin-empty"><button className="btn btn-primary" onClick={loadAdminMessages}>Load Enquiries</button></div>
                     )}
+                  </div>
+                </>
+              )}
+
+              {/* Consults */}
+              {adminTab === 'consultations' && (
+                <>
+                  <div className="admin-page-header">
+                    <h2 className="admin-page-title">🩺 Consults</h2>
+                    <button className="btn btn-primary" onClick={loadAdminConsultations}>🔄 Refresh</button>
+                  </div>
+                  <div className="admin-table-wrapper">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Customer</th>
+                          <th>Pet</th>
+                          <th>Service</th>
+                          <th>Preferred Date</th>
+                          <th>Phone</th>
+                          <th>Status</th>
+                          <th>Booked</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminConsultations.map(c => (
+                          <tr key={c.id}>
+                            <td className="admin-code">#{c.id}</td>
+                            <td>{c.user_name || 'Guest'}<br /><small>{c.user_email || '—'}</small></td>
+                            <td className="admin-name">{c.pet_name}<br /><small>{c.pet_type}{c.pet_breed ? ', ' + c.pet_breed : ''} · {c.pet_age} mo</small></td>
+                            <td>{c.service_icon} {c.service_name || '—'}</td>
+                            <td>
+                              <span className="admin-consult-date">
+                                📅 {formatConsultDate(c.preferred_date) || 'Not set'}
+                              </span>
+                            </td>
+                            <td>{c.phone || '—'}</td>
+                            <td>
+                              <select className="admin-status-select" value={c.status} onChange={async (e) => {
+                                try {
+                                  await apiFetch('/consultations/' + c.id + '/status', { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) });
+                                  loadAdminConsultations();
+                                } catch (err) { alert(err.message); }
+                              }}>
+                                <option value="pending">Pending</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                              </select>
+                            </td>
+                            <td className="admin-date">{new Date(c.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                        {adminConsultations.length === 0 && (
+                          <tr><td colSpan={8} className="admin-empty"><button className="btn btn-primary" onClick={loadAdminConsultations}>Load Consults</button></td></tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </>
               )}
@@ -2103,83 +2152,7 @@ function App() {
                 </>
               )}
 
-              {/* Pricing */}
-              {adminTab === 'pricing' && (
-                <>
-                  <div className="admin-page-header">
-                    <h2 className="admin-page-title">💰 Pricing Management</h2>
-                    <button className="btn btn-primary" onClick={()=>setShowBulkPricing(!showBulkPricing)}>📊 Bulk Discount</button>
-                  </div>
-                  {showBulkPricing&&<div style={{padding:16,marginBottom:20,background:'var(--gray-100)',borderRadius:'var(--radius-md)',border:'1px solid var(--gray-200)'}}>
-                    <h4 style={{marginBottom:12,fontWeight:700}}>Apply Bulk Discount</h4>
-                    <form onSubmit={async(e)=>{e.preventDefault();const pct=parseFloat(bulkPricing.discount_percent);if(isNaN(pct)||pct<=0||pct>=100){alert('Enter 1-99%');return;}try{const items=bulkPricing.type==='pet'?adminProducts:adminFoods;let c=0;for(const item of items){if(item.price){await adminFetch('/pricing/discount',{method:'POST',body:JSON.stringify({type:bulkPricing.type,id:item.id,discount_price:Math.round(item.price*(1-pct/100)*100)/100,start:bulkPricing.start||null,end:bulkPricing.end||null})});c++;}}showToast('Applied '+pct+'% off to '+c+' items');setShowBulkPricing(false);loadAdminProducts();}catch(e){alert(e.message);}}}>
-                      <div className="co-fields">
-                        <div className="co-field"><label>Type</label><select className="co-input" value={bulkPricing.type} onChange={e=>setBulkPricing({...bulkPricing,type:e.target.value})}><option value="pet">Pets</option><option value="food">Foods</option></select></div>
-                        <div className="co-field"><label>% Off</label><input className="co-input" type="number" min="1" max="99" value={bulkPricing.discount_percent} onChange={e=>setBulkPricing({...bulkPricing,discount_percent:e.target.value})} placeholder="20"/></div>
-                        <div className="co-field"><label>&nbsp;</label><button type="submit" className="btn btn-primary">Apply</button></div>
-                      </div>
-                      <p style={{fontSize:'0.85rem',color:'var(--gray-500)',marginTop:8}}>Will apply to {bulkPricing.type==='pet'?adminProducts.length:adminFoods.length} items</p>
-                    </form>
-                  </div>}
-                  <p style={{color:'var(--gray-500)',marginBottom:20,fontSize:'0.9rem'}}>Click the <strong>💰</strong> button on any product in the <strong>Products</strong> tab to manage pricing.</p>
-                  {showPricing&&<>
-                    <div className="cart-overlay" onClick={()=>setShowPricing(null)}/>
-                    <div className="checkout-modal" style={{maxWidth:'480px'}}>
-                      <button className="auth-close" onClick={()=>setShowPricing(null)}>✕</button>
-                      <div className="checkout-header"><span className="checkout-logo">💰</span><h2>Pricing: {showPricing.item.name}</h2></div>
-                      <form onSubmit={async(e)=>{e.preventDefault();try{const{item,type}=showPricing;const ep=type==='pet'?'/pets':'/foods';await adminFetch(ep+'/'+item.id,{method:'PUT',body:JSON.stringify({price:parseFloat(pricingData.price)})});const dp=pricingData.discount_price?parseFloat(pricingData.discount_price):null;if(dp&&dp>0){await adminFetch('/pricing/discount',{method:'POST',body:JSON.stringify({type,id:item.id,discount_price:dp,start:pricingData.discount_start||null,end:pricingData.discount_end||null})});}else{try{await adminFetch('/pricing/discount',{method:'DELETE',body:JSON.stringify({type,id:item.id})});}catch(_){}}showToast('Pricing updated!');setShowPricing(null);loadAdminProducts();}catch(e){alert(e.message);}}}>
-                        <div className="co-fields">
-                          <div className="co-field co-full"><label>Base Price *</label><input className="co-input" type="number" step="0.01" min="0" value={pricingData.price} onChange={e=>setPricingData({...pricingData,price:e.target.value})} required/></div>
-                          <div className="co-field"><label>Discount Price</label><input className="co-input" type="number" step="0.01" min="0" value={pricingData.discount_price} onChange={e=>setPricingData({...pricingData,discount_price:e.target.value})}/></div>
-                          <div className="co-field"><label>Start Date</label><input className="co-input" type="date" value={pricingData.discount_start} onChange={e=>setPricingData({...pricingData,discount_start:e.target.value})}/></div>
-                          <div className="co-field"><label>End Date</label><input className="co-input" type="date" value={pricingData.discount_end} onChange={e=>setPricingData({...pricingData,discount_end:e.target.value})}/></div>
-                        </div>
-                        <div className="checkout-nav" style={{justifyContent:'flex-end'}}>
-                          <button type="button" className="btn" onClick={()=>setShowPricing(null)}>Cancel</button>
-                          <button type="submit" className="btn btn-primary" style={{marginLeft:8}}>💾 Save</button>
-                        </div>
-                      </form>
-                    </div>
-                  </>}
-                  <div className="admin-empty-state" style={{textAlign:'center',padding:40}}>
-                    <span style={{fontSize:'2.5rem',display:'block',marginBottom:12}}>💰</span>
-                    <p style={{color:'var(--gray-500)'}}>Go to the <strong>Products</strong> tab and click the 💰 button on any product to manage pricing & discounts.</p>
-                    <button className="btn btn-primary" style={{marginTop:16}} onClick={()=>setAdminTab('products')}>📦 Go to Products</button>
-                  </div>
-                </>
-              )}
 
-              {/* Images */}
-              {adminTab === 'images' && (
-                <>
-                  <div className="admin-page-header">
-                    <h2 className="admin-page-title">🖼️ Product Images</h2>
-                  </div>
-                  {showImageManager?<>
-                    <div className="cart-overlay" onClick={()=>setShowImageManager(null)}/>
-                    <div className="checkout-modal" style={{maxWidth:'480px'}}>
-                      <button className="auth-close" onClick={()=>setShowImageManager(null)}>✕</button>
-                      <div className="checkout-header"><span className="checkout-logo">🖼️</span><h2>Images: {showImageManager.item.name}</h2></div>
-                      {showImageManager.item.image&&<div style={{marginBottom:16}}>
-                        <h4 style={{fontSize:'0.85rem',fontWeight:600,marginBottom:8}}>Primary Image</h4>
-                        <img src={showImageManager.item.image} alt="" style={{width:200,height:200,objectFit:'cover',borderRadius:'var(--radius-sm)'}}/>
-                      </div>}
-                      <div className="co-field co-full"><label>Add Image URL</label>
-                        <div style={{display:'flex',gap:8}}>
-                          <input className="co-input" value={newImageUrl} onChange={e=>setNewImageUrl(e.target.value)} placeholder="https://..."/>
-                          <button className="btn btn-primary" onClick={async()=>{if(!newImageUrl.trim())return;try{await adminFetch('/images',{method:'POST',body:JSON.stringify({type:showImageManager.type,id:showImageManager.item.id,url:newImageUrl.trim()})});setNewImageUrl('');showToast('Image added');}catch(e){alert(e.message);}}} disabled={!newImageUrl.trim()}>+ Add</button>
-                        </div>
-                      </div>
-                      <div className="checkout-nav" style={{justifyContent:'flex-end'}}>
-                        <button className="btn" onClick={()=>setShowImageManager(null)}>Done</button>
-                      </div>
-                    </div>
-                  </>:<div className="admin-empty-state">
-                    <p style={{textAlign:'center',color:'var(--gray-500)',padding:40}}>Go to the <strong>Products</strong> tab and click the 🖼️ button on any product to manage images.</p>
-                    <div style={{textAlign:'center'}}><button className="btn btn-primary" onClick={()=>setAdminTab('products')}>📦 Go to Products</button></div>
-                  </div>}
-                </>
-              )}
             </div>
           </div>
         </section>
@@ -2255,35 +2228,62 @@ function App() {
                   {checkoutStep === 0 && (
                     <div className="co-section">
                       <h3>Shipping Information</h3>
+
+                      <div className="co-account-box">
+                        <span className="co-account-icon">👤</span>
+                        <div className="co-account-info">
+                          <strong>{shippingInfo.name || user?.name || '—'}</strong>
+                          <span>{shippingInfo.email || user?.email || '—'}</span>
+                        </div>
+                        <span className="co-account-badge">✓ From your account</span>
+                      </div>
+
                       <div className="co-fields">
                         <div className="co-field co-full">
                           <label>Full Name *</label>
-                          <input className="co-input" placeholder="John Doe" value={shippingInfo.name} onChange={e => setShippingInfo({...shippingInfo, name: e.target.value})} />
+                          <input className="co-input" placeholder="John Doe" value={shippingInfo.name || user?.name || ''} readOnly disabled={!!(shippingInfo.name || user?.name)} />
                         </div>
                         <div className="co-field">
                           <label>Email *</label>
-                          <input className="co-input" type="email" placeholder="you@example.com" value={shippingInfo.email} onChange={e => setShippingInfo({...shippingInfo, email: e.target.value})} />
+                          <input className="co-input" type="email" placeholder="you@example.com" value={shippingInfo.email || user?.email || ''} readOnly disabled={!!(shippingInfo.email || user?.email)} />
                         </div>
                         <div className="co-field">
                           <label>Phone</label>
                           <input className="co-input" placeholder="(555) 123-4567" value={shippingInfo.phone} onChange={e => setShippingInfo({...shippingInfo, phone: e.target.value})} />
                         </div>
-                        <div className="co-field co-full">
-                          <label>Address *</label>
-                          <input className="co-input" placeholder="123 Pet Street" value={shippingInfo.address} onChange={e => setShippingInfo({...shippingInfo, address: e.target.value})} />
-                        </div>
-                        <div className="co-field">
-                          <label>City *</label>
-                          <input className="co-input" placeholder="Animal City" value={shippingInfo.city} onChange={e => setShippingInfo({...shippingInfo, city: e.target.value})} />
-                        </div>
-                        <div className="co-field">
-                          <label>State</label>
-                          <input className="co-input" placeholder="CA" value={shippingInfo.state} onChange={e => setShippingInfo({...shippingInfo, state: e.target.value})} />
-                        </div>
-                        <div className="co-field">
-                          <label>ZIP Code</label>
-                          <input className="co-input" placeholder="12345" value={shippingInfo.zip} onChange={e => setShippingInfo({...shippingInfo, zip: e.target.value})} />
-                        </div>
+                        {savedAddress && !editAddress ? (
+                          <div className="co-field co-full">
+                            <label>Address *</label>
+                            <div className="co-address-summary">
+                              <div className="co-address-text">
+                                <strong>{shippingInfo.address}</strong>
+                                <span>{shippingInfo.city}, {shippingInfo.state} {shippingInfo.zip}</span>
+                              </div>
+                              <button type="button" className="co-change-address" onClick={() => setEditAddress(true)}>
+                                ✏️ Change Address
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="co-field co-full">
+                              <label>Address *</label>
+                              <input className="co-input" placeholder="123 Pet Street" value={shippingInfo.address} onChange={e => setShippingInfo({...shippingInfo, address: e.target.value})} />
+                            </div>
+                            <div className="co-field">
+                              <label>City *</label>
+                              <input className="co-input" placeholder="Animal City" value={shippingInfo.city} onChange={e => setShippingInfo({...shippingInfo, city: e.target.value})} />
+                            </div>
+                            <div className="co-field">
+                              <label>State</label>
+                              <input className="co-input" placeholder="CA" value={shippingInfo.state} onChange={e => setShippingInfo({...shippingInfo, state: e.target.value})} />
+                            </div>
+                            <div className="co-field">
+                              <label>ZIP Code</label>
+                              <input className="co-input" placeholder="12345" value={shippingInfo.zip} onChange={e => setShippingInfo({...shippingInfo, zip: e.target.value})} />
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2364,6 +2364,16 @@ function App() {
                               shipping: shippingInfo,
                             }),
                           });
+                          const addr = {
+                            phone: shippingInfo.phone,
+                            address: shippingInfo.address,
+                            city: shippingInfo.city,
+                            state: shippingInfo.state,
+                            zip: shippingInfo.zip,
+                          };
+                          localStorage.setItem('petstore_address' + (user?.id ? '_' + user.id : ''), JSON.stringify(addr));
+                          setSavedAddress(addr);
+                          setEditAddress(false);
                           setOrderResult(result);
                         } catch (err) {
                           alert('Order failed: ' + err.message);
@@ -2390,62 +2400,118 @@ function App() {
           <div className="checkout-modal orders-modal">
             <button className="auth-close" onClick={() => setShowOrders(false)}>✕</button>
             <div className="checkout-header">
-              <span className="checkout-logo">📦</span>
-              <h2>My Orders</h2>
-              <p>Your order history</p>
-            </div>
-            <div className="orders-list">
-              {userOrders.length === 0 ? (
-                <div className="orders-empty">
-                  <span>📭</span>
-                  <p>No orders yet</p>
-                </div>
+              {ordersTab === 'orders' ? (
+                <>
+                  <span className="checkout-logo">📦</span>
+                  <h2>My Orders</h2>
+                  <p>Your order history</p>
+                </>
               ) : (
-                userOrders.map(order => (
-                  <div key={order.id} className="order-card">
-                    <div className="order-card-header">
-                      <span className="order-id">#{order.id}</span>
-                      <span className={`order-status order-status-${order.status}`}>{order.status}</span>
-                      <span className="order-payment-status">{order.payment_status === 'paid' ? '✅ Paid' : '⏳ ' + order.payment_status}</span>
-                    </div>
-                    <div className="order-card-body">
-                      {order.items.map(item => (
-                        <div key={item.id} className="order-item">
-                          <img src={item.image} alt={item.name} className="order-item-img" />
-                          <div className="order-item-info">
-                            <strong>{item.name}</strong>
-                            <span>{item.breed} × {item.quantity}</span>
-                          </div>
-                          <span className="order-item-price">${(item.price * item.quantity).toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="order-card-footer">
-                      <span>Total: <strong>${order.total.toFixed(2)}</strong></span>
-                      <span className="order-date">{new Date(order.created_at).toLocaleDateString()}</span>
-                      {(order.status === 'confirmed' || order.status === 'pending') && (
-                        <button
-                          className="order-cancel-btn"
-                          onClick={async () => {
-                            if (confirm('Cancel this order?')) {
-                              try {
-                                await apiFetch(`/orders/${order.id}/cancel`, { method: 'POST' });
-                                const updated = await apiFetch('/orders/history');
-                                setUserOrders(updated);
-                              } catch (err) {
-                                alert(err.message);
-                              }
-                            }
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))
+                <>
+                  <span className="checkout-logo">🩺</span>
+                  <h2>My Consults</h2>
+                  <p>Your booked consults</p>
+                </>
               )}
             </div>
+
+            {ordersTab === 'orders' && (
+              <div className="orders-list">
+                {userOrders.length === 0 ? (
+                  <div className="orders-empty">
+                    <span>📭</span>
+                    <p>No orders yet</p>
+                  </div>
+                ) : (
+                  userOrders.map(order => (
+                    <div key={order.id} className="order-card">
+                      <div className="order-card-header">
+                        <span className="order-id">#{order.id}</span>
+                        <span className={`order-status order-status-${order.status}`}>{order.status}</span>
+                        <span className="order-payment-status">{order.payment_status === 'paid' ? '✅ Paid' : '⏳ ' + order.payment_status}</span>
+                      </div>
+                      <div className="order-card-body">
+                        {order.items.map(item => (
+                          <div key={item.id} className="order-item">
+                            <img src={item.image} alt={item.name} className="order-item-img" />
+                            <div className="order-item-info">
+                              <strong>{item.name}</strong>
+                              <span>{item.breed} × {item.quantity}</span>
+                            </div>
+                            <span className="order-item-price">${(item.price * item.quantity).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="order-card-footer">
+                        <span>Total: <strong>${order.total.toFixed(2)}</strong></span>
+                        <span className="order-date">{new Date(order.created_at).toLocaleDateString()}</span>
+                        {(order.status === 'confirmed' || order.status === 'pending') && (
+                          <button
+                            className="order-cancel-btn"
+                            onClick={async () => {
+                              if (confirm('Cancel this order?')) {
+                                try {
+                                  await apiFetch(`/orders/${order.id}/cancel`, { method: 'POST' });
+                                  const updated = await apiFetch('/orders/history');
+                                  setUserOrders(updated);
+                                } catch (err) {
+                                  alert(err.message);
+                                }
+                              }
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {ordersTab === 'consultations' && (
+              <div className="orders-list">
+                {userConsultations.length === 0 ? (
+                  <div className="orders-empty">
+                    <span>🩺</span>
+                    <p>No consults yet</p>
+                  </div>
+                ) : (
+                  userConsultations.map(c => (
+                    <div key={c.id} className="order-card consult-card">
+                      <div className="order-card-header">
+                        <span className="order-id">#{c.id}</span>
+                        <span className={`order-status order-status-${c.status}`}>{c.status}</span>
+                        <span className="order-payment-status">{c.service_icon} {c.service_name}</span>
+                      </div>
+                      <div className="order-card-body">
+                        <div className="consult-card-row">
+                          <span className="consult-card-label">Pet</span>
+                          <strong>{c.pet_name} <small>({c.pet_type}{c.pet_breed ? ', ' + c.pet_breed : ''} · {c.pet_age} mo)</small></strong>
+                        </div>
+                        <div className="consult-card-row consult-date-row">
+                          <span className="consult-card-label">📅 Preferred Date</span>
+                          <strong className="consult-date-value">
+                            {formatConsultDate(c.preferred_date) || 'Not set'}
+                          </strong>
+                        </div>
+                        <div className="consult-card-row">
+                          <span className="consult-card-label">Contact</span>
+                          <span>{c.phone}</span>
+                        </div>
+                      </div>
+                      <div className="order-card-footer">
+                        <span>Booked: <strong>{new Date(c.created_at).toLocaleDateString()}</strong></span>
+                        {c.service_price != null && (
+                          <span className="order-date">Service: <strong>${c.service_price}</strong></span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -2520,10 +2586,6 @@ function App() {
               )}
             </div>
 
-            <div className="auth-demo-hint">
-              <span>💡</span>
-              <p>Demo: <strong>demo@petstore.com</strong> / <strong>demo1234</strong></p>
-            </div>
           </div>
         </>
       )}
@@ -2538,7 +2600,7 @@ function App() {
             <h4>Quick Links</h4>
             <a href="#pets" onClick={(e) => { e.preventDefault(); setActiveTab('pets'); }}>Browse Pets</a>
             <a href="#food" onClick={(e) => { e.preventDefault(); setActiveTab('food'); }}>Pet Food</a>
-            <a href="#consultation" onClick={(e) => { e.preventDefault(); setActiveTab('consultation'); }}>Consultation</a>
+            <a href="#consultation" onClick={(e) => { e.preventDefault(); setActiveTab('consultation'); }}>Consult</a>
             <a href="#contact">Contact</a>
           </div>
           <div className="footer-social">

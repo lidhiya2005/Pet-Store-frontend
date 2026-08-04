@@ -143,18 +143,6 @@
   box-shadow: 0 8px 25px rgba(108, 99, 255, 0.4);
 }
 
-.btn-secondary {
-  background: white;
-  color: var(--dark);
-  border: 2px solid var(--gray-300);
-}
-
-.btn-secondary:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-  transform: translateY(-2px);
-}
-
 .hero-stats {
   display: flex;
   justify-content: center;

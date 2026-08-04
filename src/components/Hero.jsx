@@ -24,9 +24,6 @@ export default function Hero() {
           <a href="#pets" className="btn btn-primary">
             Browse Pets ↓
           </a>
-          <a href="#contact" className="btn btn-secondary">
-            Learn More
-          </a>
         </div>
         <div className="hero-stats">
           <div className="stat">

@@ -104,14 +104,6 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now'))
         );
 
-        CREATE TABLE IF NOT EXISTS consultation_purposes (
-            id TEXT PRIMARY KEY,
-            label TEXT NOT NULL,
-            icon TEXT,
-            category TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
         CREATE TABLE IF NOT EXISTS consultations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
@@ -120,26 +112,9 @@ def init_db():
             pet_type TEXT NOT NULL,
             pet_breed TEXT,
             pet_age TEXT NOT NULL,
-            pet_weight TEXT,
-            pet_gender TEXT,
-            owner_name TEXT NOT NULL,
-            email TEXT NOT NULL,
+            preferred_date TEXT,
+            description TEXT NOT NULL,
             phone TEXT NOT NULL,
-            address TEXT,
-            purposes TEXT,
-            allergies TEXT,
-            medications TEXT,
-            chronic_conditions TEXT,
-            is_vaccinated TEXT,
-            had_surgeries TEXT,
-            last_vet_visit TEXT,
-            emergency_name TEXT,
-            emergency_phone TEXT,
-            emergency_relation TEXT,
-            preferred_date TEXT NOT NULL,
-            preferred_time TEXT NOT NULL,
-            preferred_contact TEXT DEFAULT 'email',
-            notes TEXT,
             status TEXT DEFAULT 'pending' CHECK(status IN ('pending','confirmed','completed','cancelled')),
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
@@ -157,6 +132,7 @@ def init_db():
         DROP TABLE IF EXISTS order_items;
         DROP TABLE IF EXISTS orders;
         DROP TABLE IF EXISTS cart_items;
+        DROP TABLE IF EXISTS consultation_purposes;
 
         CREATE TABLE IF NOT EXISTS cart_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +215,54 @@ def init_db():
             print(f"  - Added {col} column to {table} table")
         except sqlite3.OperationalError:
             pass
+
+    # Add preferred_date to consultations if missing (existing databases)
+    try:
+        ccols = {r[1] for r in conn.execute("PRAGMA table_info(consultations)").fetchall()}
+        if "preferred_date" not in ccols:
+            conn.execute("ALTER TABLE consultations ADD COLUMN preferred_date TEXT")
+            print("  - Added preferred_date column to consultations table")
+    except sqlite3.OperationalError:
+        pass
+
+    # Migrate consultations: keep only pet details, description, and guardian phone.
+    # Old rows map their `notes` text into the new `description` column.
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(consultations)").fetchall()}
+        if "email" in cols:
+            print("  - Migrating consultations table (dropping unused columns)")
+            conn.executescript(
+                """
+                PRAGMA foreign_keys=OFF;
+                ALTER TABLE consultations RENAME TO consultations_old;
+                CREATE TABLE consultations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT,
+                    service_id TEXT NOT NULL,
+                    pet_name TEXT NOT NULL,
+                    pet_type TEXT NOT NULL,
+                    pet_breed TEXT,
+                    pet_age TEXT NOT NULL,
+                    preferred_date TEXT,
+                    description TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending','confirmed','completed','cancelled')),
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (service_id) REFERENCES consultation_types(id)
+                );
+                INSERT INTO consultations (id, user_id, service_id, pet_name, pet_type, pet_breed, pet_age, preferred_date, description, phone, status, created_at, updated_at)
+                    SELECT id, user_id, service_id, pet_name, pet_type, pet_breed, pet_age,
+                           preferred_date,
+                           COALESCE(NULLIF(TRIM(notes), ''), 'Consult request'),
+                           phone, status, created_at, updated_at
+                    FROM consultations_old;
+                DROP TABLE consultations_old;
+                PRAGMA foreign_keys=ON;
+                """
+            )
+    except sqlite3.OperationalError as e:
+        print(f"  - Skipped consultations migration: {e}")
 
     conn.commit()
     conn.close()

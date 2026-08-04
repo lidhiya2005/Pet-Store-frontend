@@ -178,45 +178,6 @@ export const petFoods = [
   },
 ];
 
-export const consultationTypes = [
-  {
-    id: 'c1', name: 'General Veterinary Checkup',
-    duration: '30 min', price: 75,
-    icon: '🩺',
-    description: 'Comprehensive health assessment including vitals, weight, and overall condition.',
-  },
-  {
-    id: 'c2', name: 'Vaccination Appointment',
-    duration: '20 min', price: 45,
-    icon: '💉',
-    description: 'Essential vaccinations for your pet based on age and lifestyle needs.',
-  },
-  {
-    id: 'c3', name: 'Pet Grooming Session',
-    duration: '60 min', price: 65,
-    icon: '✂️',
-    description: 'Full grooming: bath, brush, nail trim, ear cleaning, and stylish cut.',
-  },
-  {
-    id: 'c4', name: 'Behavioral Consultation',
-    duration: '45 min', price: 80,
-    icon: '🧠',
-    description: 'Expert advice on training, anxiety, aggression, and behavior modification.',
-  },
-  {
-    id: 'c5', name: 'Dental Cleaning & Check',
-    duration: '40 min', price: 95,
-    icon: '🦷',
-    description: 'Professional scaling, polish, and oral health assessment for fresh breath.',
-  },
-  {
-    id: 'c6', name: 'Nutrition & Diet Plan',
-    duration: '35 min', price: 60,
-    icon: '🥗',
-    description: 'Personalized meal planning for weight management or special dietary needs.',
-  },
-];
-
 export const demoUsers = [
   {
     id: 'u1', name: 'Alex Johnson', email: 'alex@example.com',
@@ -233,21 +194,6 @@ export const demoUsers = [
     password: 'demo1234', avatar: 'DU',
     pets: [],
   },
-];
-
-export const consultationPurposes = [
-  { id: 'p1', label: 'Routine Checkup', icon: '🩺', category: 'wellness' },
-  { id: 'p2', label: 'Vaccination', icon: '💉', category: 'wellness' },
-  { id: 'p3', label: 'Sick / Injury', icon: '🏥', category: 'health' },
-  { id: 'p4', label: 'Dental Care', icon: '🦷', category: 'health' },
-  { id: 'p5', label: 'Grooming', icon: '✂️', category: 'grooming' },
-  { id: 'p6', label: 'Behavioral Issues', icon: '🧠', category: 'behavior' },
-  { id: 'p7', label: 'Nutrition / Diet', icon: '🥗', category: 'wellness' },
-  { id: 'p8', label: 'Weight Management', icon: '⚖️', category: 'wellness' },
-  { id: 'p9', label: 'Follow-up Visit', icon: '📋', category: 'health' },
-  { id: 'p10', label: 'Senior Pet Care', icon: '👴', category: 'wellness' },
-  { id: 'p11', label: 'Allergy / Skin Issues', icon: '🌿', category: 'health' },
-  { id: 'p12', label: 'Other Concern', icon: '📝', category: 'other' },
 ];
 
 export const petTypes = ['Dog', 'Cat', 'Bird', 'Fish', 'Rabbit', 'Reptile', 'Hamster', 'Guinea Pig', 'Ferret', 'Horse', 'Other'];

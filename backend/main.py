@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from database import init_db
 from seed import seed
-from router import pets, foods, consultations, cart, contact
+from router import pets, foods, consultations, cart, contact, recommendations
 from auth import require_user
 
 
@@ -48,6 +48,7 @@ app.include_router(foods.router, prefix="/api/foods")
 app.include_router(consultations.router, prefix="/api/consultations")
 app.include_router(cart.router, prefix="/api/cart")
 app.include_router(contact.router, prefix="/api/contact")
+app.include_router(recommendations.router, prefix="/api/recommendations")
 
 
 # Health check
@@ -99,11 +100,11 @@ def api_docs():
             },
             "consultations": {
                 "types": {"method": "GET", "path": "/api/consultations/types", "description": "Get consultation types"},
-                "purposes": {"method": "GET", "path": "/api/consultations/purposes", "description": "Get consultation purposes"},
-                "book": {"method": "POST", "path": "/api/consultations", "description": "Book a consultation"},
+                "book": {"method": "POST", "path": "/api/consultations", "description": "Book a consultation (pet details, description, guardian phone, preferred date)"},
                 "list": {"method": "GET", "path": "/api/consultations", "description": "List user consultations (auth required)"},
                 "get": {"method": "GET", "path": "/api/consultations/:id", "description": "Get a consultation"},
                 "updateStatus": {"method": "PATCH", "path": "/api/consultations/:id/status", "description": "Update consultation status (auth required)"},
+                "adminList": {"method": "GET", "path": "/api/admin/consultations", "description": "List all consultations (admin only, includes preferred date)"},
             },
             "contact": {
                 "submit": {"method": "POST", "path": "/api/contact", "description": "Submit a contact message"},
@@ -899,6 +900,25 @@ def admin_delete_message(message_id: int, user: dict = Depends(require_admin)):
     db.execute("DELETE FROM contact_messages WHERE id=?", (message_id,))
     db.commit(); db.close()
     return {"message": "Deleted"}
+
+
+# === Consultations ===
+@app.get("/api/admin/consultations", tags=["admin"])
+def admin_list_consultations(user: dict = Depends(require_admin)):
+    from database import get_db
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT c.*, u.name AS user_name, u.email AS user_email,
+               ct.name AS service_name, ct.icon AS service_icon
+        FROM consultations c
+        LEFT JOIN users u ON u.id = c.user_id
+        LEFT JOIN consultation_types ct ON ct.id = c.service_id
+        ORDER BY c.created_at DESC
+        """
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
 
 
 # === Users ===
