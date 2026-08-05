@@ -13,7 +13,9 @@ import './styles/index.css';
 import './styles/App.css';
 
 // ===== API Service =====
-const API_BASE = '/api';
+// Point directly to the deployed Render backend so the app works
+// both in dev (via Vite proxy) and in production (static build).
+const API_BASE = 'https://pet-store-backend-1.onrender.com/api';
 
 // Local YYYY-MM-DD for today (avoids UTC off-by-one on the date picker's min)
 const todayLocal = () => {
